@@ -9,22 +9,37 @@
     body { overflow: hidden; background: #000; }
     canvas { display: block; width: 100vw; height: 100vh; }
 
+    /* ── Name: two staggered lines ── */
     #name-overlay {
       position: fixed;
       top: 16px;
       left: 18px;
       font-family: 'Courier New', monospace;
-      font-size: 13px;
       font-weight: bold;
       color: #fff;
-      text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
-      letter-spacing: 2px;
+      text-shadow: 1px 1px 0 #000, -1px -1px 0 #000,
+                   1px -1px 0 #000, -1px  1px 0 #000;
       text-transform: uppercase;
       pointer-events: none;
       z-index: 10;
       user-select: none;
+      line-height: 1;
+    }
+    #name-overlay .n1 {
+      display: block;
+      font-size: 18px;
+      letter-spacing: 4px;
+    }
+    #name-overlay .n2 {
+      display: block;
+      font-size: 12px;
+      letter-spacing: 8px;
+      margin-left: 14px;
+      margin-top: 4px;
+      opacity: 0.72;
     }
 
+    /* ── Bottom-centre hint ── */
     #drop-hint {
       position: fixed;
       bottom: 18px;
@@ -39,6 +54,26 @@
       letter-spacing: 1px;
     }
 
+    /* ── Remove-skin button (hidden until a skin is active) ── */
+    #remove-skin {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      display: none;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: rgba(255,255,255,0.6);
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.25);
+      padding: 4px 10px;
+      cursor: pointer;
+      z-index: 10;
+    }
+    #remove-skin:hover { color: #fff; border-color: rgba(255,255,255,0.6); }
+
+    /* ── Drag overlay ── */
     #drop-overlay {
       position: fixed;
       inset: 0;
@@ -63,8 +98,14 @@
 </head>
 <body>
   <canvas id="scene"></canvas>
-  <div id="name-overlay">Woods Luikart</div>
+
+  <div id="name-overlay">
+    <span class="n1">Woods</span>
+    <span class="n2">Luikart</span>
+  </div>
+
   <div id="drop-hint">Drop a Minecraft skin PNG to apply it</div>
+  <button id="remove-skin">&#x2715; Remove skin</button>
   <div id="drop-overlay"><span>Drop skin here</span></div>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
@@ -76,27 +117,28 @@
     // CONSTANTS
     // ─────────────────────────────────────────────
     var COLORS = {
-      sky:        0x87CEEB,
-      grass_top:  0x5D8A1F,
-      grass_side: 0x7CBF3A,
-      dirt:       0x8B5E38,
-      stone:      0x848484,
-      log:        0x5A3A1E,
-      leaves:     0x2E6B12,
-      wireframe:  0x00DD88,
+      sky:       0x87CEEB,
+      grass_top: 0x5D8A1F,
+      grass_side:0x7CBF3A,
+      dirt:      0x8B5E38,
+      log:       0x5A3A1E,
+      leaves:    0x2E6B12,
+      wireframe: 0x00DD88,
+      outline:   0x002a15,
     };
 
-    var WALK_SPEED     = 2.8;   // radians/sec cycle rate
-    var WALK_AMP       = 0.50;  // max limb swing in radians
-    var HOP_AMP        = 0.30;  // vertical hop amplitude (Three.js units)
-    var SCROLL_SPEED   = 7;     // world scroll units/sec
-    var CHUNK_DEPTH    = 40;    // Z depth of each terrain chunk
-    var NUM_CHUNKS     = 4;     // number of terrain chunks in pool
-    var GROUND_WIDTH   = 28;    // X span of ground (blocks)
-    var BLOCKS_PER_ROW = 6;     // Z rows per chunk
+    var WALK_SPEED    = 3.5;   // rad/sec limb cycle
+    var WALK_AMP      = 0.50;  // max limb swing (rad)
+    var HOP_AMP       = 0.25;  // vertical bob (units)
+    var SCROLL_SPEED  = 14;    // world units/sec
+    var CHUNK_WIDTH   = 40;    // X-span of one terrain chunk
+    var CHUNK_Z_NEAR  = -1;    // nearest Z row (just behind character)
+    var CHUNK_Z_FAR   = -18;   // deepest Z row
+    var NUM_CHUNKS    = 5;
+    var SKIN_URL_LIMIT = 102400; // 100 KB — skip URL store if larger
 
     // ─────────────────────────────────────────────
-    // SCENE SETUP
+    // SCENE
     // ─────────────────────────────────────────────
     var canvas   = document.getElementById('scene');
     var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
@@ -105,19 +147,19 @@
 
     var scene = new THREE.Scene();
     scene.background = new THREE.Color(COLORS.sky);
-    scene.fog = new THREE.Fog(COLORS.sky, 60, 130);
+    scene.fog = new THREE.Fog(COLORS.sky, 50, 110);
 
-    var camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
-    camera.position.set(0, 12, 32);
-    camera.lookAt(0, 10, 0);
+    // Camera pulled back so the 32-unit character is ~50 % of viewport height.
+    // Profile (side-scroller) view: camera sits on the +Z axis looking at origin.
+    var camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 500);
+    camera.position.set(0, 15, 54);
+    camera.lookAt(0, 11, 0);
 
-    // Lighting
     var ambient = new THREE.AmbientLight(0xffffff, 0.75);
     scene.add(ambient);
     var sun = new THREE.DirectionalLight(0xfffde8, 0.9);
     sun.position.set(12, 30, 10);
     scene.add(sun);
-    // Subtle fill from below/left
     var fill = new THREE.DirectionalLight(0xaaddff, 0.25);
     fill.position.set(-8, -5, 5);
     scene.add(fill);
@@ -129,105 +171,112 @@
     });
 
     // ─────────────────────────────────────────────
-    // MINECRAFT CHARACTER MODEL
+    // CHARACTER MODEL
     // ─────────────────────────────────────────────
+    // Dimensions (Minecraft texel units, matching skinview3d source):
+    //   Head 8×8×8  |  Body 8×12×4  |  Arms/Legs 4×12×4
+    // Character local coords: feet y=0, head-top y=32.
     //
-    // Dimensions match skinview3d source (Minecraft texel units):
-    //   Head  8×8×8   Body 8×12×4   Arms 4×12×4   Legs 4×12×4
-    // Character is built with feet at y=0, head top at y=32.
-    // Scale: 1 unit = 1 texel. We position the character group
-    // so its vertical midpoint (y=16) aligns with the camera target.
+    // Each body part is a small Group containing:
+    //   outlineMesh — BackSide shell scaled 1.09×, dark solid → visible silhouette
+    //   wireMesh    — classic wireframe on top
+    // The shell is hidden when a skin is applied (skin provides visual weight).
 
-    function makeMaterial(wireframe) {
-      if (wireframe) {
-        return new THREE.MeshBasicMaterial({ color: COLORS.wireframe, wireframe: true });
-      }
-      return new THREE.MeshLambertMaterial({ color: 0xffffff });
-    }
+    function makeBodyPart(w, h, d) {
+      var geo = new THREE.BoxGeometry(w, h, d);
 
-    // Build a BoxGeometry and return [geometry, mesh]
-    function makeBox(w, h, d, mat) {
-      var geo  = new THREE.BoxGeometry(w, h, d);
-      var mesh = new THREE.Mesh(geo, mat);
-      return mesh;
-    }
+      var wireMat = new THREE.MeshBasicMaterial({ color: COLORS.wireframe, wireframe: true });
+      var wireMesh = new THREE.Mesh(geo, wireMat);
 
-    // Pivot group: child mesh is offset so rotation is at the pivot point.
-    // pivotOffsetY: how far the mesh center is below the group origin.
-    function makePivoted(mesh, pivotOffsetY) {
-      var pivot = new THREE.Group();
-      mesh.position.y = pivotOffsetY;
-      pivot.add(mesh);
-      return pivot;
+      var outlineMat = new THREE.MeshBasicMaterial({ color: COLORS.outline, side: THREE.BackSide });
+      var outlineMesh = new THREE.Mesh(geo, outlineMat);
+      outlineMesh.scale.set(1.09, 1.09, 1.09);
+
+      var grp = new THREE.Group();
+      grp.add(outlineMesh); // back-face shell first
+      grp.add(wireMesh);    // wireframe on top
+      return { group: grp, wireMesh: wireMesh, outlineMesh: outlineMesh };
     }
 
     function buildCharacter() {
       var root = new THREE.Group();
+      var outlines = [];
 
-      // Head — center at y=28 (feet=0, legs=12, body=12, half-head=4 → 28)
-      var headMat  = makeMaterial(true);
-      var headMesh = makeBox(8, 8, 8, headMat);
+      // Head (center at y=28: 0 feet + 12 legs + 12 body + 4 half-head)
+      var headPart = makeBodyPart(8, 8, 8);
       var headGrp  = new THREE.Group();
-      headGrp.add(headMesh);
+      headGrp.add(headPart.group);
       headGrp.position.y = 28;
       root.add(headGrp);
+      outlines.push(headPart.outlineMesh);
 
-      // Body — center at y=18 (feet=0, legs=12, half-body=6 → 18)
-      var bodyMat  = makeMaterial(true);
-      var bodyMesh = makeBox(8, 12, 4, bodyMat);
+      // Body (center at y=18: 0 + 12 + 6)
+      var bodyPart = makeBodyPart(8, 12, 4);
       var bodyGrp  = new THREE.Group();
-      bodyGrp.add(bodyMesh);
+      bodyGrp.add(bodyPart.group);
       bodyGrp.position.y = 18;
       root.add(bodyGrp);
+      outlines.push(bodyPart.outlineMesh);
 
-      // Right Arm — shoulder pivot at y=24 (top of body), x=-6
-      var rArmMat   = makeMaterial(true);
-      var rArmMesh  = makeBox(4, 12, 4, rArmMat);
-      var rArmPivot = makePivoted(rArmMesh, -6);   // mesh center 6 below shoulder
+      // Right Arm — pivot at shoulder (y=24), part offset -6 below pivot
+      var rArmPart = makeBodyPart(4, 12, 4);
+      rArmPart.group.position.y = -6;
+      var rArmPivot = new THREE.Group();
+      rArmPivot.add(rArmPart.group);
       rArmPivot.position.set(-6, 24, 0);
       root.add(rArmPivot);
+      outlines.push(rArmPart.outlineMesh);
 
-      // Left Arm — shoulder pivot at y=24, x=+6
-      var lArmMat   = makeMaterial(true);
-      var lArmMesh  = makeBox(4, 12, 4, lArmMat);
-      var lArmPivot = makePivoted(lArmMesh, -6);
+      // Left Arm
+      var lArmPart = makeBodyPart(4, 12, 4);
+      lArmPart.group.position.y = -6;
+      var lArmPivot = new THREE.Group();
+      lArmPivot.add(lArmPart.group);
       lArmPivot.position.set(6, 24, 0);
       root.add(lArmPivot);
+      outlines.push(lArmPart.outlineMesh);
 
-      // Right Leg — hip pivot at y=12 (bottom of body), x=-2
-      var rLegMat   = makeMaterial(true);
-      var rLegMesh  = makeBox(4, 12, 4, rLegMat);
-      var rLegPivot = makePivoted(rLegMesh, -6);
+      // Right Leg — pivot at hip (y=12)
+      var rLegPart = makeBodyPart(4, 12, 4);
+      rLegPart.group.position.y = -6;
+      var rLegPivot = new THREE.Group();
+      rLegPivot.add(rLegPart.group);
       rLegPivot.position.set(-2, 12, 0);
       root.add(rLegPivot);
+      outlines.push(rLegPart.outlineMesh);
 
-      // Left Leg — hip pivot at y=12, x=+2
-      var lLegMat   = makeMaterial(true);
-      var lLegMesh  = makeBox(4, 12, 4, lLegMat);
-      var lLegPivot = makePivoted(lLegMesh, -6);
+      // Left Leg
+      var lLegPart = makeBodyPart(4, 12, 4);
+      lLegPart.group.position.y = -6;
+      var lLegPivot = new THREE.Group();
+      lLegPivot.add(lLegPart.group);
       lLegPivot.position.set(2, 12, 0);
       root.add(lLegPivot);
+      outlines.push(lLegPart.outlineMesh);
 
       return {
-        group:      root,
-        headGrp:    headGrp,
-        rArmPivot:  rArmPivot,
-        lArmPivot:  lArmPivot,
-        rLegPivot:  rLegPivot,
-        lLegPivot:  lLegPivot,
-        // Mesh refs for skin UV application
-        headMesh:   headMesh,
-        bodyMesh:   bodyMesh,
-        rArmMesh:   rArmMesh,
-        lArmMesh:   lArmMesh,
-        rLegMesh:   rLegMesh,
-        lLegMesh:   lLegMesh,
-        hasSkin:    false,
+        group:     root,
+        headGrp:   headGrp,
+        rArmPivot: rArmPivot, lArmPivot: lArmPivot,
+        rLegPivot: rLegPivot, lLegPivot: lLegPivot,
+        // wireMesh refs used by the skin system
+        headMesh:  headPart.wireMesh,
+        bodyMesh:  bodyPart.wireMesh,
+        rArmMesh:  rArmPart.wireMesh,
+        lArmMesh:  lArmPart.wireMesh,
+        rLegMesh:  rLegPart.wireMesh,
+        lLegMesh:  lLegPart.wireMesh,
+        outlines:  outlines,
+        hasSkin:   false,
       };
     }
 
     var character = buildCharacter();
-    // Position character so its mid-point (y≈16) is near camera target
+    // Profile / side-scroller: rotate so character faces +X (right on screen).
+    // Camera is at +Z, so we see the character's -X local face = its right side.
+    character.group.rotation.y = Math.PI / 2;
+    // worldGroup.position.y = -8.5 → grass top face at world y=-8.0
+    // character feet at world y = -8 + 0 = -8.0  ✓
     character.group.position.set(0, -8, 0);
     scene.add(character.group);
 
@@ -237,33 +286,37 @@
     var wireHue = 0;
 
     function animateCharacter(t) {
-      var walkT   = t * WALK_SPEED;
-      var swing   = Math.sin(walkT) * WALK_AMP;
+      var walkT = t * WALK_SPEED;
+      var swing = Math.sin(walkT) * WALK_AMP;
 
-      // Arms opposite phase to legs (natural walking gait)
+      // Arms/legs swing in opposite phase
       character.rArmPivot.rotation.x =  swing;
       character.lArmPivot.rotation.x = -swing;
       character.rLegPivot.rotation.x = -swing;
       character.lLegPivot.rotation.x =  swing;
 
-      // Vertical bob: two peaks per walk cycle
-      var hop = Math.abs(Math.sin(walkT)) * HOP_AMP;
-      character.group.position.y = -8 + hop;
+      // Vertical bob (two peaks per walk cycle)
+      character.group.position.y = -8 + Math.abs(Math.sin(walkT)) * HOP_AMP;
 
-      // Head slight sway
-      character.headGrp.rotation.y = Math.sin(walkT * 0.5) * 0.12;
+      // Head: subtle forward-tilt bob (z rotation is visible from profile)
+      character.headGrp.rotation.z = Math.sin(walkT * 0.5) * 0.06;
 
-      // Wireframe hue pulse when no skin is loaded
+      // Hue-cycle the wireframe when no skin is loaded
       if (!character.hasSkin) {
         wireHue = (wireHue + 0.003) % 1;
-        var hueColor = new THREE.Color().setHSL(wireHue, 0.7, 0.55);
+        var hue = new THREE.Color().setHSL(wireHue, 0.7, 0.55);
         var meshes = [
           character.headMesh, character.bodyMesh,
           character.rArmMesh, character.lArmMesh,
           character.rLegMesh, character.lLegMesh,
         ];
         for (var i = 0; i < meshes.length; i++) {
-          meshes[i].material.color.copy(hueColor);
+          meshes[i].material.color.copy(hue);
+        }
+        // Keep outline colour a dark echo of the current hue
+        var darkHue = new THREE.Color().setHSL(wireHue, 0.6, 0.07);
+        for (var j = 0; j < character.outlines.length; j++) {
+          character.outlines[j].material.color.copy(darkHue);
         }
       }
     }
@@ -271,27 +324,23 @@
     // ─────────────────────────────────────────────
     // WORLD / TERRAIN
     // ─────────────────────────────────────────────
+    // Side-scroller layout:
+    //   Chunks are arranged along the X axis and scroll in the -X direction.
+    //   The character sits stationary at x=0, z=0 while the world passes by.
+    //   Each chunk spans CHUNK_WIDTH columns in X and CHUNK_Z_FAR..CHUNK_Z_NEAR
+    //   rows in Z (purely behind the character — never between character & camera).
 
-    // Reusable geometries for instanced-style block building
-    var blockGeo = new THREE.BoxGeometry(1, 1, 1);
+    var blockGeo       = new THREE.BoxGeometry(1, 1, 1);
+    var matGrassTop    = new THREE.MeshLambertMaterial({ color: COLORS.grass_top  });
+    var matGrassSide   = new THREE.MeshLambertMaterial({ color: COLORS.grass_side });
+    var matDirt        = new THREE.MeshLambertMaterial({ color: COLORS.dirt       });
+    var matLog         = new THREE.MeshLambertMaterial({ color: COLORS.log        });
+    var matLeaves      = new THREE.MeshLambertMaterial({ color: COLORS.leaves     });
 
-    var matGrassTop  = new THREE.MeshLambertMaterial({ color: COLORS.grass_top });
-    var matGrassSide = new THREE.MeshLambertMaterial({ color: COLORS.grass_side });
-    var matDirt      = new THREE.MeshLambertMaterial({ color: COLORS.dirt });
-    var matStone     = new THREE.MeshLambertMaterial({ color: COLORS.stone });
-    var matLog       = new THREE.MeshLambertMaterial({ color: COLORS.log });
-    var matLeaves    = new THREE.MeshLambertMaterial({ color: COLORS.leaves });
-
-    // 6-sided block material: [+x, -x, +y, -y, +z, -z]
-    var grassBlockMat = [
-      matGrassSide, matGrassSide,
-      matGrassTop,  matDirt,
-      matGrassSide, matGrassSide,
-    ];
-    var dirtBlockMat  = [matDirt, matDirt, matDirt, matDirt, matDirt, matDirt];
-    var stoneBlockMat = [matStone, matStone, matStone, matStone, matStone, matStone];
-    var logBlockMat   = [matLog, matLog, matLog, matLog, matLog, matLog];
-    var leavesBlockMat= [matLeaves, matLeaves, matLeaves, matLeaves, matLeaves, matLeaves];
+    var grassBlockMat  = [matGrassSide, matGrassSide, matGrassTop, matDirt, matGrassSide, matGrassSide];
+    var dirtBlockMat   = [matDirt,   matDirt,   matDirt,   matDirt,   matDirt,   matDirt  ];
+    var logBlockMat    = [matLog,    matLog,    matLog,    matLog,    matLog,    matLog   ];
+    var leavesBlockMat = [matLeaves, matLeaves, matLeaves, matLeaves, matLeaves, matLeaves];
 
     function addBlock(parent, x, y, z, mat) {
       var m = new THREE.Mesh(blockGeo, mat);
@@ -299,102 +348,79 @@
       parent.add(m);
     }
 
-    // Deterministic "random" based on seed
-    function seededVal(x, z, seed) {
-      var n = Math.sin(x * 12.9898 + z * 78.233 + seed * 43.1) * 43758.5453;
+    function seededVal(a, b, c) {
+      var n = Math.sin(a * 12.9898 + b * 78.233 + c * 43.1) * 43758.5453;
       return n - Math.floor(n);
     }
 
-    function buildChunk(chunkSeed) {
+    // Build one terrain chunk.  startX = world X of its first column (column 0).
+    function buildChunk(startX) {
       var group = new THREE.Group();
-      var halfW = Math.floor(GROUND_WIDTH / 2);
+      for (var lx = 0; lx < CHUNK_WIDTH; lx++) {
+        var absX = startX + lx;
+        for (var z = CHUNK_Z_FAR; z <= CHUNK_Z_NEAR; z++) {
+          // Ground surface + one dirt layer below
+          addBlock(group, lx, 0,  z, grassBlockMat);
+          addBlock(group, lx, -1, z, dirtBlockMat);
 
-      for (var x = -halfW; x <= halfW; x++) {
-        for (var row = 0; row < BLOCKS_PER_ROW; row++) {
-          // Gently rolling height using two sine waves
-          var h = Math.round(
-            Math.sin(x * 0.35 + chunkSeed * 1.7) * 1.5 +
-            Math.cos(x * 0.6  + chunkSeed * 0.9) * 0.8
-          );
-          var z = -row;
-
-          // Grass top block
-          addBlock(group, x, h, z, grassBlockMat);
-          // 2 dirt blocks below
-          addBlock(group, x, h - 1, z, dirtBlockMat);
-          addBlock(group, x, h - 2, z, dirtBlockMat);
-          // Stone below that
-          addBlock(group, x, h - 3, z, stoneBlockMat);
-
-          // Trees: roughly 1 per 9 columns, on z=row 1-4 only
-          if (row >= 1 && row <= 4 && seededVal(x, chunkSeed, row) > 0.88) {
-            var treeH = Math.floor(seededVal(x + 1, z, chunkSeed) * 2) + 3; // 3-4 tall
+          // Trees: mid-to-far background only, low density
+          if (z <= -3 && z >= -15 && seededVal(absX, z, 5) > 0.93) {
+            var treeH = Math.floor(seededVal(absX, z, 11) * 2) + 4; // 4 or 5 tall
             for (var ty = 1; ty <= treeH; ty++) {
-              addBlock(group, x, h + ty, z, logBlockMat);
+              addBlock(group, lx, ty, z, logBlockMat);
             }
-            // Leaf canopy (3x3x2 centered on top of trunk)
-            for (var lx = -1; lx <= 1; lx++) {
+            // 3×2×3 leaf canopy
+            for (var ly = 0; ly <= 1; ly++) {
               for (var lz = -1; lz <= 1; lz++) {
-                for (var ly = 0; ly <= 1; ly++) {
-                  // Skip trunk column on bottom layer
-                  if (lx === 0 && lz === 0 && ly === 0) continue;
-                  addBlock(group, x + lx, h + treeH + ly, z + lz, leavesBlockMat);
+                for (var lx2 = -1; lx2 <= 1; lx2++) {
+                  if (lx2 === 0 && lz === 0 && ly === 0) continue;
+                  addBlock(group, lx + lx2, treeH + ly, z + lz, leavesBlockMat);
                 }
               }
             }
           }
         }
       }
+      group.userData.startX = startX;
       return group;
     }
 
-    // Ground Y: we want ground surface at y=-8 (character feet level in world space)
-    var GROUND_BASE_Y = -8;
-
+    // Ground blocks at local y=0 → top face at world y = -8.5 + 0.5 = -8.0
+    // Character feet at world y = -8 + 0 = -8.0  ✓
     var worldGroup = new THREE.Group();
-    worldGroup.position.y = GROUND_BASE_Y;
+    worldGroup.position.y = -8.5;
     scene.add(worldGroup);
 
-    // Build chunk pool
+    // Spread chunks along X: one behind character, rest ahead to the right.
+    // Camera horizontal half-width ≈ 58 units; chunks 1-2 fill the initial view.
     var chunks = [];
     for (var ci = 0; ci < NUM_CHUNKS; ci++) {
-      var chk = buildChunk(ci * 7 + 3);
-      chk.position.z = -ci * CHUNK_DEPTH;
-      chk.userData.seed = ci * 7 + 3;
+      var startX = (ci - 1) * CHUNK_WIDTH; // -40, 0, 40, 80, 120
+      var chk = buildChunk(startX);
+      chk.position.x = startX;
       worldGroup.add(chk);
       chunks.push(chk);
     }
 
-    var worldScroll = 0;
-
     function updateWorld(dt) {
-      worldScroll += SCROLL_SPEED * dt;
-
       for (var i = 0; i < chunks.length; i++) {
         var c = chunks[i];
-        // Shift each chunk toward the camera each frame
-        c.position.z += SCROLL_SPEED * dt;
+        c.position.x -= SCROLL_SPEED * dt; // world scrolls left → character walks right
 
-        // When a chunk passes the camera (z > some threshold past origin),
-        // recycle it to the back.
-        var threshold = 12; // a bit past the character
-        if (c.position.z > threshold) {
-          // Find the chunk with the smallest Z (furthest back)
-          var minZ = Infinity;
+        // Recycle when chunk's right edge passes the left boundary
+        if (c.position.x + CHUNK_WIDTH < -65) {
+          var maxX = -Infinity;
           for (var j = 0; j < chunks.length; j++) {
-            if (chunks[j].position.z < minZ) minZ = chunks[j].position.z;
+            if (chunks[j].position.x > maxX) maxX = chunks[j].position.x;
           }
-          c.position.z = minZ - CHUNK_DEPTH;
+          var newX = maxX + CHUNK_WIDTH;
+          c.position.x = newX;
 
-          // Rebuild with a new seed for variety
-          c.userData.seed += NUM_CHUNKS * 7;
-          // Remove old children
+          // Rebuild with the new absolute X for fresh terrain variety
           while (c.children.length > 0) c.remove(c.children[0]);
-          // Rebuild
-          var rebuilt = buildChunk(c.userData.seed);
-          while (rebuilt.children.length > 0) {
-            c.add(rebuilt.children[0]);
-          }
+          var rebuilt = buildChunk(newX);
+          c.userData.startX = newX;
+          while (rebuilt.children.length > 0) c.add(rebuilt.children[0]);
         }
       }
     }
@@ -402,88 +428,62 @@
     // ─────────────────────────────────────────────
     // SKIN SYSTEM
     // ─────────────────────────────────────────────
-    //
-    // Minecraft skin UV layout (64×64 PNG, y=0 at top):
-    //   Each entry is [px_x, px_y, px_w, px_h] for the face region.
-    //   Three.js BoxGeometry face order: right(+x), left(-x), top(+y), bottom(-y), front(+z), back(-z)
+    // Minecraft skin UV layout (64×64 PNG, y=0 at top-left).
+    // BoxGeometry face order: right(+x), left(-x), top(+y), bottom(-y), front(+z), back(-z).
 
     var SKIN_UVS = {
-      // [right, left, top, bottom, front, back]
       head: [
-        [16, 8, 8, 8],   // right
-        [0,  8, 8, 8],   // left
-        [8,  0, 8, 8],   // top
-        [16, 0, 8, 8],   // bottom
-        [8,  8, 8, 8],   // front (face)
-        [24, 8, 8, 8],   // back
+        [16, 8, 8, 8], [0,  8, 8, 8],
+        [8,  0, 8, 8], [16, 0, 8, 8],
+        [8,  8, 8, 8], [24, 8, 8, 8],
       ],
       body: [
-        [28, 20, 4, 12],
-        [16, 20, 4, 12],
-        [20, 16, 8,  4],
-        [28, 16, 8,  4],
-        [20, 20, 8, 12],
-        [32, 20, 8, 12],
+        [28, 20, 4, 12], [16, 20, 4, 12],
+        [20, 16, 8,  4], [28, 16, 8,  4],
+        [20, 20, 8, 12], [32, 20, 8, 12],
       ],
       rightArm: [
-        [48, 20, 4, 12],
-        [40, 20, 4, 12],
-        [44, 16, 4,  4],
-        [48, 16, 4,  4],
-        [44, 20, 4, 12],
-        [52, 20, 4, 12],
+        [48, 20, 4, 12], [40, 20, 4, 12],
+        [44, 16, 4,  4], [48, 16, 4,  4],
+        [44, 20, 4, 12], [52, 20, 4, 12],
       ],
       leftArm_modern: [
-        [40, 52, 4, 12],
-        [32, 52, 4, 12],
-        [36, 48, 4,  4],
-        [40, 48, 4,  4],
-        [36, 52, 4, 12],
-        [44, 52, 4, 12],
+        [40, 52, 4, 12], [32, 52, 4, 12],
+        [36, 48, 4,  4], [40, 48, 4,  4],
+        [36, 52, 4, 12], [44, 52, 4, 12],
       ],
       rightLeg: [
-        [8,  20, 4, 12],
-        [0,  20, 4, 12],
-        [4,  16, 4,  4],
-        [8,  16, 4,  4],
-        [4,  20, 4, 12],
-        [12, 20, 4, 12],
+        [8,  20, 4, 12], [0,  20, 4, 12],
+        [4,  16, 4,  4], [8,  16, 4,  4],
+        [4,  20, 4, 12], [12, 20, 4, 12],
       ],
       leftLeg_modern: [
-        [24, 52, 4, 12],
-        [16, 52, 4, 12],
-        [20, 48, 4,  4],
-        [24, 48, 4,  4],
-        [20, 52, 4, 12],
-        [28, 52, 4, 12],
+        [24, 52, 4, 12], [16, 52, 4, 12],
+        [20, 48, 4,  4], [24, 48, 4,  4],
+        [20, 52, 4, 12], [28, 52, 4, 12],
       ],
     };
 
-    // For legacy 64x32 skins: mirror right arm/leg for left side
     function mirrorUVs(uvs) {
       var m = uvs.slice();
-      // Swap right (+x) and left (-x) faces
       var tmp = m[0]; m[0] = m[1]; m[1] = tmp;
       return m;
     }
 
-    // Apply UV region array to a BoxGeometry's uv attribute.
-    // regions: array of 6 [x,y,w,h] in 64×64 pixel space (y=0 at top)
     function applyUVRegions(geometry, regions) {
       var uvData = [];
       var W = 64, H = 64;
       for (var f = 0; f < 6; f++) {
-        var r = regions[f];
-        var u0 = r[0] / W;
-        var u1 = (r[0] + r[2]) / W;
-        // Flip V because Three.js UV v=0 is at bottom, PNG y=0 is at top
-        var v1 = 1 - r[1] / H;           // top of region in UV space
-        var v0 = 1 - (r[1] + r[3]) / H;  // bottom of region in UV space
-        // BoxGeometry vertex order per face: TL, TR, BL, BR
+        var r  = regions[f];
+        var u0 = r[0] / W,         u1 = (r[0] + r[2]) / W;
+        var v1 = 1 - r[1] / H,     v0 = 1 - (r[1] + r[3]) / H;
         uvData.push(u0, v1,  u1, v1,  u0, v0,  u1, v0);
       }
       geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvData), 2));
     }
+
+    var dropHint     = document.getElementById('drop-hint');
+    var removeSkinBtn = document.getElementById('remove-skin');
 
     var SkinSystem = (function () {
       var currentTex = null;
@@ -493,30 +493,37 @@
         texture.minFilter = THREE.NearestFilter;
         texture.needsUpdate = true;
 
-        var leftArmUVs = isModern ? SKIN_UVS.leftArm_modern : mirrorUVs(SKIN_UVS.rightArm);
-        var leftLegUVs = isModern ? SKIN_UVS.leftLeg_modern : mirrorUVs(SKIN_UVS.rightLeg);
+        var leftArmUVs = isModern ? SKIN_UVS.leftArm_modern  : mirrorUVs(SKIN_UVS.rightArm);
+        var leftLegUVs = isModern ? SKIN_UVS.leftLeg_modern  : mirrorUVs(SKIN_UVS.rightLeg);
 
         var parts = [
-          { mesh: character.headMesh,  uvs: SKIN_UVS.head },
-          { mesh: character.bodyMesh,  uvs: SKIN_UVS.body },
-          { mesh: character.rArmMesh,  uvs: SKIN_UVS.rightArm },
-          { mesh: character.lArmMesh,  uvs: leftArmUVs },
-          { mesh: character.rLegMesh,  uvs: SKIN_UVS.rightLeg },
-          { mesh: character.lLegMesh,  uvs: leftLegUVs },
+          { mesh: character.headMesh, uvs: SKIN_UVS.head     },
+          { mesh: character.bodyMesh, uvs: SKIN_UVS.body     },
+          { mesh: character.rArmMesh, uvs: SKIN_UVS.rightArm },
+          { mesh: character.lArmMesh, uvs: leftArmUVs        },
+          { mesh: character.rLegMesh, uvs: SKIN_UVS.rightLeg },
+          { mesh: character.lLegMesh, uvs: leftLegUVs        },
         ];
 
         for (var i = 0; i < parts.length; i++) {
           applyUVRegions(parts[i].mesh.geometry, parts[i].uvs);
           parts[i].mesh.material.dispose();
           parts[i].mesh.material = new THREE.MeshLambertMaterial({
-            map: texture,
-            transparent: true,
-            alphaTest: 0.1,
+            map: texture, transparent: true, alphaTest: 0.1,
           });
         }
+
         character.hasSkin = true;
+        // Outline shells are redundant once a real skin is applied
+        for (var k = 0; k < character.outlines.length; k++) {
+          character.outlines[k].visible = false;
+        }
+
         if (currentTex && currentTex !== texture) currentTex.dispose();
         currentTex = texture;
+
+        removeSkinBtn.style.display = 'block';
+        dropHint.textContent = 'Skin applied! Drop another to change it.';
       }
 
       function resetToWireframe() {
@@ -527,83 +534,114 @@
         ];
         for (var i = 0; i < meshes.length; i++) {
           meshes[i].material.dispose();
-          meshes[i].material = makeMaterial(true);
+          meshes[i].material = new THREE.MeshBasicMaterial({
+            color: COLORS.wireframe, wireframe: true,
+          });
+        }
+        for (var k = 0; k < character.outlines.length; k++) {
+          character.outlines[k].visible = true;
         }
         character.hasSkin = false;
         if (currentTex) { currentTex.dispose(); currentTex = null; }
       }
 
-      function handleFile(file) {
-        if (!file || file.type !== 'image/png') return;
-
-        var img = new Image();
-        var url = URL.createObjectURL(file);
-        img.onload = function () {
-          var w = img.width, h = img.height;
-          if (w !== 64 || (h !== 64 && h !== 32)) {
-            URL.revokeObjectURL(url);
-            return; // silently ignore invalid skins
-          }
-          var isModern = (h === 64);
-          var loader = new THREE.TextureLoader();
-          loader.load(url, function (tex) {
-            URL.revokeObjectURL(url);
-            applyTexture(tex, isModern);
-          });
-        };
-        img.onerror = function () { URL.revokeObjectURL(url); };
-        img.src = url;
+      // Shared helper: load a DataURL as a texture then apply it.
+      function loadFromDataUrl(dataUrl, isModern) {
+        var loader = new THREE.TextureLoader();
+        loader.load(dataUrl, function (tex) { applyTexture(tex, isModern); });
       }
 
-      return { handleFile: handleFile, resetToWireframe: resetToWireframe };
+      function handleFile(file) {
+        if (!file || file.type !== 'image/png') return;
+        var fileSize = file.size; // capture before async read
+        var reader   = new FileReader();
+        reader.onload = function (e) {
+          var dataUrl = e.target.result;
+          var img = new Image();
+          img.onload = function () {
+            var w = img.width, h = img.height;
+            if (w !== 64 || (h !== 64 && h !== 32)) return; // not a valid skin
+            var isModern = (h === 64);
+
+            // Persist skin in URL so it survives a page reload / can be shared
+            if (fileSize <= SKIN_URL_LIMIT) {
+              try {
+                var params = new URLSearchParams();
+                params.set('skin', dataUrl);
+                history.replaceState(null, '', '?' + params.toString());
+              } catch (_) { /* URL too long or replaceState unavailable */ }
+            }
+
+            loadFromDataUrl(dataUrl, isModern);
+          };
+          img.src = dataUrl;
+        };
+        reader.readAsDataURL(file);
+      }
+
+      return { handleFile: handleFile, resetToWireframe: resetToWireframe, loadFromDataUrl: loadFromDataUrl };
     })();
+
+    // ─────────────────────────────────────────────
+    // REMOVE SKIN BUTTON
+    // ─────────────────────────────────────────────
+    removeSkinBtn.addEventListener('click', function () {
+      SkinSystem.resetToWireframe();
+      history.replaceState(null, '', location.pathname); // clear URL param
+      dropHint.textContent = 'Drop a Minecraft skin PNG to apply it';
+      removeSkinBtn.style.display = 'none';
+    });
 
     // ─────────────────────────────────────────────
     // DRAG-AND-DROP
     // ─────────────────────────────────────────────
     var dropOverlay = document.getElementById('drop-overlay');
-    var dropHint    = document.getElementById('drop-hint');
-    var dragDepth   = 0; // track nested dragenter/dragleave
+    var dragDepth   = 0;
 
     document.addEventListener('dragenter', function (e) {
-      e.preventDefault();
-      dragDepth++;
+      e.preventDefault(); dragDepth++;
       dropOverlay.classList.add('active');
     });
-    document.addEventListener('dragover', function (e) {
-      e.preventDefault();
-    });
-    document.addEventListener('dragleave', function (e) {
-      dragDepth--;
-      if (dragDepth <= 0) {
-        dragDepth = 0;
-        dropOverlay.classList.remove('active');
-      }
+    document.addEventListener('dragover',  function (e) { e.preventDefault(); });
+    document.addEventListener('dragleave', function () {
+      if (--dragDepth <= 0) { dragDepth = 0; dropOverlay.classList.remove('active'); }
     });
     document.addEventListener('drop', function (e) {
       e.preventDefault();
       dragDepth = 0;
       dropOverlay.classList.remove('active');
       var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (file) {
-        SkinSystem.handleFile(file);
-        dropHint.textContent = 'Skin applied! Drop another to change it.';
-      }
+      if (file) SkinSystem.handleFile(file);
     });
+
+    // ─────────────────────────────────────────────
+    // URL SKIN RESTORE
+    // ─────────────────────────────────────────────
+    // On load, check ?skin= for a base64-encoded DataURL from a previous session.
+    (function tryRestoreSkinFromURL() {
+      var params   = new URLSearchParams(window.location.search);
+      var skinData = params.get('skin');
+      if (!skinData || skinData.indexOf('data:image/png') !== 0) return;
+
+      var img = new Image();
+      img.onload = function () {
+        if (img.width !== 64 || (img.height !== 64 && img.height !== 32)) return;
+        SkinSystem.loadFromDataUrl(skinData, img.height === 64);
+      };
+      img.src = skinData;
+    })();
 
     // ─────────────────────────────────────────────
     // MAIN LOOP
     // ─────────────────────────────────────────────
-    var clock   = new THREE.Clock();
+    var clock = new THREE.Clock();
 
     function animate() {
       requestAnimationFrame(animate);
-      var dt = Math.min(clock.getDelta(), 0.05); // cap delta to avoid spiral
+      var dt = Math.min(clock.getDelta(), 0.05);
       var t  = clock.getElapsedTime();
-
       animateCharacter(t);
       updateWorld(dt);
-
       renderer.render(scene, camera);
     }
 
