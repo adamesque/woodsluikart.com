@@ -154,7 +154,7 @@
     // FOV 65°, far 800 to accommodate deep forest.
     var camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 1, 800);
     camera.position.set(0, 40, 48);
-    camera.lookAt(0, 8, -24);
+    camera.lookAt(0, 24, -20); // raised Y: character sits lower in the viewport
 
     var ambient = new THREE.AmbientLight(0xffffff, 0.75);
     scene.add(ambient);
@@ -273,8 +273,9 @@
     }
 
     var character = buildCharacter();
-    // Third-person: character faces -Z (into the world). Camera at +Z sees the back. ✓
-    character.group.rotation.y = Math.PI;
+    // Front-facing: character faces +Z (toward camera). Camera sees the face.
+    // Arm/leg rotation.x swing unchanged — correct walking gait from the front.
+    character.group.rotation.y = 0;
     // Ground block center at y=0 → top face at y=BLOCK/2=8 → character feet at y=8 ✓
     character.group.position.set(0, BLOCK / 2, 0);
     scene.add(character.group);
@@ -329,12 +330,63 @@
     //   Z: 5 rows per chunk (80u span), 8 chunks total (~640u of terrain depth).
     //   Character walks at x=0, z=0 on the flat center path.
 
-    var blockGeo       = new THREE.BoxGeometry(BLOCK, BLOCK, BLOCK);
-    var matGrassTop    = new THREE.MeshLambertMaterial({ color: COLORS.grass_top  });
-    var matGrassSide   = new THREE.MeshLambertMaterial({ color: COLORS.grass_side });
-    var matDirt        = new THREE.MeshLambertMaterial({ color: COLORS.dirt       });
-    var matLog         = new THREE.MeshLambertMaterial({ color: COLORS.log        });
-    var matLeaves      = new THREE.MeshLambertMaterial({ color: COLORS.leaves     });
+    var blockGeo = new THREE.BoxGeometry(BLOCK, BLOCK, BLOCK);
+
+    // 4×4 pixel textures — NearestFilter gives the chunky Minecraft aesthetic.
+    function makePixelTex(px) {
+      var cv = document.createElement('canvas');
+      cv.width = cv.height = 4;
+      var ctx = cv.getContext('2d');
+      var img = ctx.createImageData(4, 4);
+      for (var i = 0; i < 16; i++) {
+        img.data[i*4]   = (px[i] >> 16) & 0xff;
+        img.data[i*4+1] = (px[i] >>  8) & 0xff;
+        img.data[i*4+2] =  px[i]        & 0xff;
+        img.data[i*4+3] = 0xff;
+      }
+      ctx.putImageData(img, 0, 0);
+      var t = new THREE.CanvasTexture(cv);
+      t.magFilter = t.minFilter = THREE.NearestFilter;
+      return t;
+    }
+    var PX = {
+      grassTop: [
+        0x5B8A1A, 0x659726, 0x4D7A14, 0x5B8A1A,
+        0x659726, 0x4D7A14, 0x5B8A1A, 0x659726,
+        0x4D7A14, 0x5B8A1A, 0x659726, 0x4D7A14,
+        0x5B8A1A, 0x659726, 0x4D7A14, 0x5B8A1A,
+      ],
+      grassSide: [
+        0x659726, 0x5B8A1A, 0x659726, 0x5B8A1A,
+        0x7A5232, 0x8B5E38, 0x5B8A1A, 0x7A5232,
+        0x8B5E38, 0x7A5232, 0x8B5E38, 0x7A5232,
+        0x7A5232, 0x8B5E38, 0x7A5232, 0x8B5E38,
+      ],
+      dirt: [
+        0x8B5E38, 0x7A5232, 0x96653E, 0x8B5E38,
+        0x7A5232, 0x96653E, 0x8B5E38, 0x7A5232,
+        0x96653E, 0x8B5E38, 0x7A5232, 0x96653E,
+        0x8B5E38, 0x7A5232, 0x96653E, 0x8B5E38,
+      ],
+      log: [
+        0x4A2E14, 0x5A3A1E, 0x5A3A1E, 0x4A2E14,
+        0x5A3A1E, 0x5A3A1E, 0x5A3A1E, 0x5A3A1E,
+        0x5A3A1E, 0x5A3A1E, 0x5A3A1E, 0x5A3A1E,
+        0x4A2E14, 0x5A3A1E, 0x5A3A1E, 0x4A2E14,
+      ],
+      leaves: [
+        0x357A18, 0x2A6010, 0x357A18, 0x2A6010,
+        0x2A6010, 0x3D8E1E, 0x2A6010, 0x357A18,
+        0x357A18, 0x2A6010, 0x3D8E1E, 0x2A6010,
+        0x2A6010, 0x357A18, 0x2A6010, 0x357A18,
+      ],
+    };
+
+    var matGrassTop  = new THREE.MeshLambertMaterial({ map: makePixelTex(PX.grassTop)  });
+    var matGrassSide = new THREE.MeshLambertMaterial({ map: makePixelTex(PX.grassSide) });
+    var matDirt      = new THREE.MeshLambertMaterial({ map: makePixelTex(PX.dirt)      });
+    var matLog       = new THREE.MeshLambertMaterial({ map: makePixelTex(PX.log)       });
+    var matLeaves    = new THREE.MeshLambertMaterial({ map: makePixelTex(PX.leaves)    });
 
     var grassBlockMat  = [matGrassSide, matGrassSide, matGrassTop, matDirt, matGrassSide, matGrassSide];
     var dirtBlockMat   = [matDirt,   matDirt,   matDirt,   matDirt,   matDirt,   matDirt  ];
