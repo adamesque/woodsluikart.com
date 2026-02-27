@@ -131,10 +131,10 @@
     var WALK_SPEED    = 3.5;   // rad/sec limb cycle
     var WALK_AMP      = 0.50;  // max limb swing (rad)
     var HOP_AMP       = 4;     // vertical bob (units) — 1/4 block
-    var SCROLL_SPEED  = 56;    // world units/sec — 3.5 block-widths/sec
-    var CHUNK_COLS    = 20;    // block columns per chunk
-    var CHUNK_Z_ROWS  = 10;    // block rows deep into screen
-    var NUM_CHUNKS    = 5;
+    var SCROLL_SPEED  = 40;    // world units/sec — terrain flows toward camera
+    var CHUNK_COLS    = 13;    // X-width of terrain: lx = -6..+6 around character
+    var CHUNK_Z_ROWS  = 5;     // Z rows per chunk (CHUNK_SPAN = 5×16 = 80u)
+    var NUM_CHUNKS    = 8;     // enough to fill -Z ahead and +Z behind camera
     var SKIN_URL_LIMIT = 102400; // 100 KB — skip URL store if larger
 
     // ─────────────────────────────────────────────
@@ -147,14 +147,14 @@
 
     var scene = new THREE.Scene();
     scene.background = new THREE.Color(COLORS.sky);
-    scene.fog = new THREE.Fog(COLORS.sky, 100, 400);
+    scene.fog = new THREE.Fog(COLORS.sky, 80, 400);
 
-    // Camera: profile (side-scroller) view from +Z.
-    // At z=72, FOV 70°: viewport height ≈ 100u → character (32u) ≈ 32% of screen.
-    // Trees (5-7 blocks = 80-112u) tower over the character (2 blocks = 32u) ✓
-    var camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 800);
-    camera.position.set(0, 28, 72);
-    camera.lookAt(0, 20, 0);
+    // Third-person: camera behind and above character, looking forward into the world.
+    // Character at (0, 8, 0); camera at (0, 40, 48) looks over the character's shoulder.
+    // FOV 65°, far 800 to accommodate deep forest.
+    var camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 1, 800);
+    camera.position.set(0, 40, 48);
+    camera.lookAt(0, 8, -24);
 
     var ambient = new THREE.AmbientLight(0xffffff, 0.75);
     scene.add(ambient);
@@ -273,8 +273,8 @@
     }
 
     var character = buildCharacter();
-    // Profile / side-scroller: rotate so character faces +X (right on screen).
-    character.group.rotation.y = Math.PI / 2;
+    // Third-person: character faces -Z (into the world). Camera at +Z sees the back. ✓
+    character.group.rotation.y = Math.PI;
     // Ground block center at y=0 → top face at y=BLOCK/2=8 → character feet at y=8 ✓
     character.group.position.set(0, BLOCK / 2, 0);
     scene.add(character.group);
@@ -297,8 +297,8 @@
       // Vertical bob (two peaks per walk cycle) — bounces between y=8 and y=12
       character.group.position.y = BLOCK / 2 + Math.abs(Math.sin(walkT)) * HOP_AMP;
 
-      // Head: subtle forward-tilt bob (z rotation is visible from profile)
-      character.headGrp.rotation.z = Math.sin(walkT * 0.5) * 0.06;
+      // Head: subtle nod (x rotation visible from behind)
+      character.headGrp.rotation.x = Math.sin(walkT * 0.5) * 0.04;
 
       // Hue-cycle the wireframe when no skin is loaded
       if (!character.hasSkin) {
@@ -323,11 +323,11 @@
     // ─────────────────────────────────────────────
     // WORLD / TERRAIN
     // ─────────────────────────────────────────────
-    // Side-scroller layout:
-    //   Chunks are arranged along the X axis and scroll in the -X direction.
-    //   The character sits stationary at x=0, z=0 while the world passes by.
-    //   Each chunk spans CHUNK_COLS (20) columns × BLOCK (16u) = 320u wide,
-    //   and CHUNK_Z_ROWS (10) rows deep into -Z behind the character.
+    // Third-person world layout:
+    //   Chunks are a 2D X×Z grid, scrolling in +Z (flowing past the camera).
+    //   X: 13 columns centered on character (lx=-6..+6, ±96u).
+    //   Z: 5 rows per chunk (80u span), 8 chunks total (~640u of terrain depth).
+    //   Character walks at x=0, z=0 on the flat center path.
 
     var blockGeo       = new THREE.BoxGeometry(BLOCK, BLOCK, BLOCK);
     var matGrassTop    = new THREE.MeshLambertMaterial({ color: COLORS.grass_top  });
@@ -352,28 +352,38 @@
       return n - Math.floor(n);
     }
 
-    // Build one terrain chunk. startCol = absolute block-column index of first column.
-    // Blocks positioned at multiples of BLOCK so each block is 16×16×16 units.
-    // Terrain extends into -Z (behind character); z=0 path stays clear.
-    function buildChunk(startCol) {
+    // Build one terrain chunk centered on x=0.
+    // startAbsZ = absolute block-Z index of the chunk's first row (for seeding).
+    // X: lx = -6..+6 (13 columns, centered on character).
+    // Z: lz = 0..CHUNK_Z_ROWS-1 (local; world Z = chunk.position.z + lz*BLOCK).
+    // Center path (|lx| ≤ 2) is always flat — hills grow toward the edges.
+    // Trees only at |lx| ≥ 3, keeping the 5-block-wide walking lane clear.
+    function buildChunk(startAbsZ) {
       var group = new THREE.Group();
-      for (var lc = 0; lc < CHUNK_COLS; lc++) {
-        var absCol = startCol + lc;
-        // Surface height in blocks — gentle rolling hills visible from the side
-        var surfH = Math.round(Math.sin(absCol * 0.23) * 2 + Math.cos(absCol * 0.13) * 1);
-        for (var rz = 1; rz <= CHUNK_Z_ROWS; rz++) {
-          var bx = lc * BLOCK;
-          var bz = -rz * BLOCK;
+      for (var lx = -6; lx <= 6; lx++) {
+        for (var lz = 0; lz < CHUNK_Z_ROWS; lz++) {
+          var absZ  = startAbsZ + lz;
+          var bx    = lx * BLOCK;
+          var bz    = lz * BLOCK;
+
+          // Height: zero on path, rolling hills toward edges
+          var dist  = Math.max(0, Math.abs(lx) - 2);        // 0 for |lx|≤2
+          var edgeF = Math.min(1, dist / 4);                 // 0→1 ramp
+          var rawH  = Math.sin(lx * 0.32 + absZ * 0.11) * 2 +
+                      Math.cos(absZ * 0.19 + lx * 0.17) * 1.5;
+          var surfH = Math.round(rawH * edgeF);
+
           var by = surfH * BLOCK;
           addBlock(group, bx, by,         bz, grassBlockMat);
           addBlock(group, bx, by - BLOCK, bz, dirtBlockMat);
-          // Trees in mid-to-far rows; ~12% column density; 5-7 blocks tall
-          if (rz >= 2 && rz <= 9 && seededVal(absCol, rz, 7) > 0.88) {
-            var tH = Math.floor(seededVal(absCol, rz, 11) * 3) + 5;
+
+          // Trees: only in the outer columns, ~14% density, 5-7 blocks tall
+          if (Math.abs(lx) >= 3 && seededVal(lx, absZ, 7) > 0.86) {
+            var tH = Math.floor(seededVal(lx, absZ, 11) * 3) + 5;
             for (var ty = 1; ty <= tH; ty++) {
               addBlock(group, bx, by + ty * BLOCK, bz, logBlockMat);
             }
-            // 3×3 leaf ring for top two trunk levels
+            // 3×3 leaf ring around top two trunk levels + single top cap
             for (var llz = -1; llz <= 1; llz++) {
               for (var llx = -1; llx <= 1; llx++) {
                 if (llx === 0 && llz === 0) continue;
@@ -381,11 +391,11 @@
                 addBlock(group, bx + llx*BLOCK, by + (tH-1)*BLOCK,   bz + llz*BLOCK, leavesBlockMat);
               }
             }
-            addBlock(group, bx, by + (tH + 1) * BLOCK, bz, leavesBlockMat); // top cap
+            addBlock(group, bx, by + (tH + 1) * BLOCK, bz, leavesBlockMat);
           }
         }
       }
-      group.userData.startCol = startCol;
+      group.userData.startAbsZ = startAbsZ;
       return group;
     }
 
@@ -393,14 +403,16 @@
     var worldGroup = new THREE.Group();
     scene.add(worldGroup);
 
-    // CHUNK_SPAN = columns × block-size = 20 × 16 = 320 units per chunk.
-    // Spread chunks along +X, one behind character, rest ahead to the right.
-    var CHUNK_SPAN = CHUNK_COLS * BLOCK;
+    // CHUNK_SPAN = Z-extent per chunk = CHUNK_Z_ROWS × BLOCK = 5 × 16 = 80u.
+    // Chunks spread in -Z (ahead of character). The first chunk sits at z=0, covering
+    // world z=0..+64 — terrain right between character and camera from frame 1.
+    var CHUNK_SPAN = CHUNK_Z_ROWS * BLOCK;
     var chunks = [];
     for (var ci = 0; ci < NUM_CHUNKS; ci++) {
-      var startCol = (ci - 1) * CHUNK_COLS;   // −20, 0, 20, 40, 60
-      var chk = buildChunk(startCol);
-      chk.position.x = startCol * BLOCK;      // −320, 0, 320, 640, 960
+      var startZ    = -ci * CHUNK_SPAN;           // 0, -80, -160, …, -560
+      var startAbsZ = Math.round(startZ / BLOCK); // 0, -5, -10, …, -35
+      var chk       = buildChunk(startAbsZ);
+      chk.position.z = startZ;
       worldGroup.add(chk);
       chunks.push(chk);
     }
@@ -408,22 +420,22 @@
     function updateWorld(dt) {
       for (var i = 0; i < chunks.length; i++) {
         var c = chunks[i];
-        c.position.x -= SCROLL_SPEED * dt; // world scrolls left → character walks right
+        c.position.z += SCROLL_SPEED * dt; // world flows toward +Z, past the camera
 
-        // Recycle when chunk's right edge passes the left boundary
-        if (c.position.x + CHUNK_SPAN < -80) {
-          var maxX = -Infinity;
+        // Recycle once the chunk has fully passed the camera (+Z side)
+        if (c.position.z > 96) {
+          var minZ = +Infinity;
           for (var j = 0; j < chunks.length; j++) {
-            if (chunks[j].position.x > maxX) maxX = chunks[j].position.x;
+            if (chunks[j].position.z < minZ) minZ = chunks[j].position.z;
           }
-          var newPosX     = maxX + CHUNK_SPAN;
-          var newStartCol = Math.round(newPosX / BLOCK);
-          c.position.x    = newPosX;
+          var newPosZ     = minZ - CHUNK_SPAN;
+          var newStartAbsZ = Math.round(newPosZ / BLOCK);
+          c.position.z    = newPosZ;
 
-          // Rebuild with new column index for fresh terrain variety
+          // Rebuild with fresh terrain for the new position
           while (c.children.length > 0) c.remove(c.children[0]);
-          var rebuilt = buildChunk(newStartCol);
-          c.userData.startCol = newStartCol;
+          var rebuilt = buildChunk(newStartAbsZ);
+          c.userData.startAbsZ = newStartAbsZ;
           while (rebuilt.children.length > 0) c.add(rebuilt.children[0]);
         }
       }
