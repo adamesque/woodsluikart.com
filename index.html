@@ -461,8 +461,8 @@
     var CHUNK_SPAN = CHUNK_Z_ROWS * BLOCK;
     var chunks = [];
     for (var ci = 0; ci < NUM_CHUNKS; ci++) {
-      var startZ    = -ci * CHUNK_SPAN;           // 0, -80, -160, …, -560
-      var startAbsZ = Math.round(startZ / BLOCK); // 0, -5, -10, …, -35
+      var startZ    = (1 - ci) * CHUNK_SPAN;       // +80, 0, -80, …, -480
+      var startAbsZ = Math.round(startZ / BLOCK); // +5, 0, -5, …, -30
       var chk       = buildChunk(startAbsZ);
       chk.position.z = startZ;
       worldGroup.add(chk);
@@ -472,17 +472,17 @@
     function updateWorld(dt) {
       for (var i = 0; i < chunks.length; i++) {
         var c = chunks[i];
-        c.position.z += SCROLL_SPEED * dt; // world flows toward +Z, past the camera
+        c.position.z -= SCROLL_SPEED * dt; // world flows toward -Z, into the distance
 
-        // Recycle once the chunk has fully passed the camera (+Z side)
-        if (c.position.z > 96) {
-          var minZ = +Infinity;
+        // Recycle once the chunk has scrolled far enough into the fog (-Z side)
+        if (c.position.z < -560) {
+          var maxZ = -Infinity;
           for (var j = 0; j < chunks.length; j++) {
-            if (chunks[j].position.z < minZ) minZ = chunks[j].position.z;
+            if (chunks[j].position.z > maxZ) maxZ = chunks[j].position.z;
           }
-          var newPosZ     = minZ - CHUNK_SPAN;
+          var newPosZ      = maxZ + CHUNK_SPAN;
           var newStartAbsZ = Math.round(newPosZ / BLOCK);
-          c.position.z    = newPosZ;
+          c.position.z     = newPosZ;
 
           // Rebuild with fresh terrain for the new position
           while (c.children.length > 0) c.remove(c.children[0]);
